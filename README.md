@@ -1,29 +1,29 @@
-Here is a complete, production-ready `README.md` file designed for your GitHub repository. It includes proper markdown syntax, layout blocks, math equations, and code blocks that perfectly summarize your implementation based on the repository structure and results.
+Here is a complete, production-ready README.md file designed for your GitHub repository. It includes proper markdown syntax, layout blocks, math equations, and code blocks that perfectly summarize your implementation based on the repository structure and results.
 
 ---
 
-```markdown
-# Custom LSTM Character-Level Text Generation (Tolkien Corpus)
+markdown
+ Custom LSTM Character-Level Text Generation (Tolkien Corpus)
 
-[cite_start]An optimized, from-scratch implementation of a 2-layer stacked Long Short-Term Memory (LSTM) network built in PyTorch without relying on high-level wrappers like `nn.LSTM` or `nn.LSTMCell`[cite: 106, 110, 139]. The architecture is designed to map character sequence statistics and autoregressively synthesize text in the distinct literary style of J.R.R. [cite_start]Tolkien[cite: 83, 124, 191].
+[cite_start]An optimized, from-scratch implementation of a 2-layer stacked Long Short-Term Memory (LSTM) network built in PyTorch without relying on high-level wrappers like nn.LSTM or nn.LSTMCell[cite: 106, 110, 139]. The architecture is designed to map character sequence statistics and autoregressively synthesize text in the distinct literary style of J.R.R. [cite_start]Tolkien[cite: 83, 124, 191].
 
-[cite_start]This project was developed as part of the **Sequence Learning (Summer Term 2026)** curriculum at the Universität zu Lübeck[cite: 3, 9, 10].
-
----
-
-## 🚀 Key Features
-
-* [cite_start]**From-Scratch Layer Design:** Pure mathematical execution using elementary linear transformations (`nn.Linear`) and explicit non-linear activation gates[cite: 110, 135].
-* [cite_start]**Fused Matrix Efficiency:** Combines all four internal gating projections (forget, input, cell candidate, and output) into a single unified matrix multiplication (`4 * hidden_size`) to utilize optimal BLAS execution paths[cite: 136, 142, 143].
-* [cite_start]**Closed-Loop Autoregression:** Employs a dual-phase execution engine using teacher forcing for internal state warm-up, followed by greedy decoding over feedback loops[cite: 190, 191].
-* [cite_start]**Sequence-First Layout Optimization:** Structured tensor layout mapping dimensions directly to `(Sequence_Length, Batch_Size, Feature_Dim)` to ensure seamless compatibility with cross-entropy tracking[cite: 117, 150, 151].
+[cite_start]This project was developed as part of the Sequence Learning (Summer Term 2026) curriculum at the Universität zu Lübeck[cite: 3, 9, 10].
 
 ---
 
-## 📁 Repository Structure
+ 🚀 Key Features
 
-```text
-Question4/
+ [cite_start]From-Scratch Layer Design: Pure mathematical execution using elementary linear transformations (nn.Linear) and explicit non-linear activation gates[cite: 110, 135].
+ [cite_start]Fused Matrix Efficiency: Combines all four internal gating projections (forget, input, cell candidate, and output) into a single unified matrix multiplication (4  hidden_size) to utilize optimal BLAS execution paths[cite: 136, 142, 143].
+ [cite_start]Closed-Loop Autoregression: Employs a dual-phase execution engine using teacher forcing for internal state warm-up, followed by greedy decoding over feedback loops[cite: 190, 191].
+ [cite_start]Sequence-First Layout Optimization: Structured tensor layout mapping dimensions directly to (Sequence_Length, Batch_Size, Feature_Dim) to ensure seamless compatibility with cross-entropy tracking[cite: 117, 150, 151].
+
+---
+
+ 📁 Repository Structure
+
+text
+lstm_from_scratch/
 ├── models/
 │   └── lstm/
 │       ├── __init__.py
@@ -43,15 +43,15 @@ Question4/
 ├── tiny_tolkien.txt         <- Raw training text corpus
 └── documentation.txt        <- Thorough project implementation report
 
-```
+
 
 ---
 
-## ⚙️ Model Architecture
+ ⚙️ Model Architecture
 
 The deep sequence network leverages two recurrent stacked hidden layers and an independent dense linear projection layer:
 
-```text
+text
        INPUT: One-Hot Encoded Vector (Alphabet Size: 45)
                        │
                        ▼
@@ -66,11 +66,11 @@ The deep sequence network leverages two recurrent stacked hidden layers and an i
                        ▼
       OUTPUT: Predicted Next-Char Logits  (Alphabet Size: 45)
 
-```
 
-### Recurrent Gate Calculations (Single Time-step)
 
-Inside the custom `LSTMCell`, execution leverages vectorized parallel operations across a combined hidden weight space prior to element-wise splitting with `.chunk()`:
+ Recurrent Gate Calculations (Single Time-step)
+
+Inside the custom LSTMCell, execution leverages vectorized parallel operations across a combined hidden weight space prior to element-wise splitting with .chunk():
 
 $$\mathbf{g}_t = \mathbf{W}_x \mathbf{x}_t + \mathbf{W}_h \mathbf{h}_{t-1} + \mathbf{b}$$
 
@@ -82,70 +82,70 @@ $$\mathbf{h}_t = \omega_t \odot \tanh(\mathbf{s}_t)$$
 
 ---
 
-## 📈 Training Profile & Convergence Metrics
+ 📈 Training Profile & Convergence Metrics
 
-### Hyperparameter Configurations (`config.json`)
+ Hyperparameter Configurations (config.json)
 
-* 
-**Optimizer:** Adam Optimizer 
-
-
-* **Learning Rate ($LR$):** $0.001$
-* 
-**Total Epochs:** $50$ 
+ 
+Optimizer: Adam Optimizer 
 
 
-* 
-**Batch Size:** $1$ (Required to process variable-length sentence strings cleanly) 
+ Learning Rate ($LR$): $0.001$
+ 
+Total Epochs: $50$ 
 
 
-* 
-**Vocabulary Size ($d_{one\_hot}$):** 45 unique lowercase characters 
+ 
+Batch Size: $1$ (Required to process variable-length sentence strings cleanly) 
 
 
-* 
-**Trainable Parameters:** 226,477 parameters 
+ 
+Vocabulary Size ($d_{one\_hot}$): 45 unique lowercase characters 
 
 
-* 
-**Hardware Acceleration:** CUDA Pipeline (NVIDIA GeForce RTX 4050 Laptop GPU) 
+ 
+Trainable Parameters: 226,477 parameters 
+
+
+ 
+Hardware Acceleration: CUDA Pipeline (NVIDIA GeForce RTX 4050 Laptop GPU) 
 
 
 
-### Optimization Results
+ Optimization Results
 
-The pipeline achieved smooth convergence over **1,450.55 total seconds** (~24 minutes):
+The pipeline achieved smooth convergence over 1,450.55 total seconds (~24 minutes):
 
 | Milestone Target | Cross-Entropy Loss Error | Training Progress Sign |
 | --- | --- | --- |
-| **Epoch 01/50** | `3.0155793781` | Initial Baseline (+) 
+| Epoch 01/50 | 3.0155793781 | Initial Baseline (+) 
 
  |
-| **Epoch 10/50** | `1.8351824913` | Pattern Structuring (+) 
+| Epoch 10/50 | 1.8351824913 | Pattern Structuring (+) 
 
  |
-| **Epoch 20/50** | `1.4742580725` | Vocabulary Capture (+) 
+| Epoch 20/50 | 1.4742580725 | Vocabulary Capture (+) 
 
  |
-| **Epoch 30/50** | `1.2046647105` | Phrase Convergence (+) 
+| Epoch 30/50 | 1.2046647105 | Phrase Convergence (+) 
 
  |
-| **Epoch 40/50** | `0.9727720483` | Syntax Optimization (+) 
+| Epoch 40/50 | 0.9727720483 | Syntax Optimization (+) 
 
  |
-| **Epoch 50/50** | `0.7748382399` | Final Loss Drop (+) 
+| Epoch 50/50 | 0.7748382399 | Final Loss Drop (+) 
 
  |
 
 ---
 
-## 📝 Text Generation Performance Analysis
+ 📝 Text Generation Performance Analysis
 
-During verification testing (`test.py`), the model is evaluated by accepting a $30$-character seed initialization sequence to prime hidden states, followed by $400$ closed-loop autonomous steps.
+During verification testing (test.py), the model is evaluated by accepting a $30$-character seed initialization sequence to prime hidden states, followed by $400$ closed-loop autonomous steps.
 
-### Inference Output Example
+ Inference Output Example
 
-```text
+text
 Initialization: 
 ‘will you come with me?’ said ...
 
@@ -160,59 +160,59 @@ Custom LSTM Model Closed-Loop Synthesis:
  headsed beregond of the dark hour.
  nged wast papted to the stones
 
-```
-
-### Behavioral Evaluation
-
-* 
-**Syntactic Mastery:** The custom network successfully captures high-level dialogue punctuation framing (`‘...’`), tokenized turn-taking markers (`said pippin.`, `said beregond.`), context-appropriate character identities, and structural vocabulary themes native to the source composition (`the shire`, `dark hour`, `stones`, `city`).
 
 
-* 
-**Generative Bottlenecks:** Operating at a pure character-level means the long-range semantic coherence degrades across large sequence windows, producing minor orthographic non-words (`upsered`, `mestry`, `faisht`).
+ Behavioral Evaluation
+
+ 
+Syntactic Mastery: The custom network successfully captures high-level dialogue punctuation framing (‘...’), tokenized turn-taking markers (said pippin., said beregond.), context-appropriate character identities, and structural vocabulary themes native to the source composition (the shire, dark hour, stones, city).
+
+
+ 
+Generative Bottlenecks: Operating at a pure character-level means the long-range semantic coherence degrades across large sequence windows, producing minor orthographic non-words (upsered, mestry, faisht).
 
 
 
 ---
 
-## 🛠️ Execution Instructions
+ 🛠️ Execution Instructions
 
-### 1. Project Dependencies
+ 1. Project Dependencies
 
 Ensure you have PyTorch installed within your Python virtual environment:
 
-```bash
+bash
 pip install torch
 
-```
 
-### 2. Prepare the Datasets
 
-Run the preprocessing script to build the sorted alphabet list and generate your tokenized sequence file (`data.pt`):
+ 2. Prepare the Datasets
 
-```bash
+Run the preprocessing script to build the sorted alphabet list and generate your tokenized sequence file (data.pt):
+
+bash
 python3 data_preparation.py
 
-```
 
-### 3. Run Network Training
 
-Execute the training pipeline. The script optimizes weights across 50 epochs and automatically tracks and preserves the best loss checkpoints under `checkpoints/LSTM/LSTM.pt`:
+ 3. Run Network Training
 
-```bash
+Execute the training pipeline. The script optimizes weights across 50 epochs and automatically tracks and preserves the best loss checkpoints under checkpoints/LSTM/LSTM.pt:
+
+bash
 python3 train.py
 
-```
 
-### 4. Evaluate and Generate Text
+
+ 4. Evaluate and Generate Text
 
 Load your trained network weights to verify performance and evaluate text synthesis from custom seed inputs:
 
-```bash
+bash
 python3 test.py
 
-```
 
-```
 
-```
+
+
+

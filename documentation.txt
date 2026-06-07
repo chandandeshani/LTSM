@@ -1,0 +1,494 @@
+
+1. OVERVIEW
+
+
+This document provides a complete walkthrough of the LSTM character-level text
+generation pipeline, from raw data preparation through model training to text
+generation and analysis.
+
+The goal of this exercise is to implement an LSTM network from scratch and train
+it to generate Tolkien-style text at the character level.
+
+
+
+2. PROJECT STRUCTURE
+
+
+Question4/
+├── models/
+│   └── lstm/
+│       └── lstm.py          <- LSTM implementation (from scratch)
+├── utils/
+│   ├── configuration.py     <- JSON config loader
+│   ├── datasets.py          <- TolkienDataset class
+│   └── helper_functions.py  <- dataloader, save, decode helpers
+├── data/
+│   └── chapter1/
+│       └── data.pt          <- preprocessed dataset
+├── train.py                 <- training loop
+├── test.py                  <- text generation
+├── data_preparation.py      <- text -> tensors
+├── config.json              <- hyperparameters
+└── tiny_tolkien.txt         <- raw training text
+
+
+
+3. DATA PREPARATION
+
+
+
+(Raw Dataset)
+
+
+The training data is tiny_tolkien.txt
+
+Key dataset properties:
+  - All text converted to lowercase
+  - Alphabet size: 45 unique characters (letters, punctuation, whitespace)
+  - Each non-empty line becomes one training sample
+
+
+(Data Preparation - data_preparation.py)
+
+
+Running data_preparation.py performs the following steps:
+
+  Step 1: Read tiny_tolkien.txt and lowercase all lines
+  Step 2: Build a sorted alphabet of all unique characters found in the text
+  Step 3: Create a char_to_idx mapping (character -> integer index)
+  Step 4: Convert each line into a long tensor of character indices
+  Step 5: Save alphabet and samples to data/chapter1/data.pt
+
+Run before training to prepare the data:
+
+    python3 data_preparation.py
+    # Output: Saved 196 samples, alphabet of 45 chars, to /chapter1/data.pt
+
+
+(One-Hot Encoding)
+
+
+Characters are represented as one-hot vectors of size 45 (alphabet size).
+Each vector contains all zeros except at the index of the character it
+represents:
+
+    'a'  ->  [1, 0, 0, ..., 0, 0]^T
+    'b'  ->  [0, 1, 0, ..., 0, 0]^T
+     .
+     .
+    ' '  ->  [0, 0, 0, ..., 0, 1]^T
+
+The TolkienDataset class (datasets.py) handles this conversion :
+  - Input sequences:  one-hot encoded (float), shape (T-1, 45)
+  - Target sequences: raw integer indices (long),  shape (T-1,)
+
+The target is shifted by one timestep — the model predicts the NEXT character
+at each timestep (next-character prediction).
+
+
+
+4. MODEL ARCHITECTURE (lstm.py)
+ 
+
+Architecture:
+    INPUT (one-hot, size=45)
+           |
+    [ LSTM Layer 1 ]   <- hidden_size = 128
+           |
+    [ LSTM Layer 2 ]   <- hidden_size = 128
+           |
+    [ nn.Linear ]      <- projects 128 -> 45
+           |
+    OUTPUT (logits, size=45)
+
+
+(LSTMCell — Single Timestep)
+
+
+The LSTMCell computes one timestep using four gates.
+All four gates are combined into a SINGLE matrix multiply for efficiency
+
+    gates = W_x(x) + W_h(h)           # shape: (batch, 4 * hidden_size)
+    phi, iota, s_cand, omega = gates.chunk(4, dim=-1)
+
+Gate equations:
+  Forget gate:    phi   = sigmoid(W_x_phi(x)   + W_h_phi(h))
+  Input gate:     iota  = sigmoid(W_x_iota(x)  + W_h_iota(h))
+  Cell candidate: s_cand = tanh(W_x_s(x)       + W_h_s(h))
+  Output gate:    omega = sigmoid(W_x_omega(x)  + W_h_omega(h))
+
+State updates:
+  New cell state:   s_t = phi * s_{t-1}  +  iota * s_cand
+  New hidden state: h_t = omega * tanh(s_t)
+
+Gate meanings:
+  - Forget gate (phi):   controls how much of the old cell state to keep
+  - Input gate (iota):   controls how much new candidate content to write
+  - Cell candidate:      proposes new content to potentially add
+  - Output gate (omega): controls how much of the cell state to expose as h_t
+
+
+(LSTMLayer — Full Sequence)
+
+
+LSTMLayer runs LSTMCell over all T timesteps using a for-loop:
+
+    outputs = []
+    for t in range(T):
+        h, s = cell(x[t], h, s)
+        outputs.append(h)
+    return torch.cat(outputs), (h, s)
+
+Input:  x of shape (T, batch, input_size)
+Output: outputs of shape (T, batch, hidden_size), final states (h, s)
+
+Note: The for-loop is necessary because each timestep depends on the previous
+hidden state h_{t-1}.
+
+(LSTM Model — Full Architecture)
+
+
+The top-level LSTM class stacks two LSTMLayer instances and a linear output:
+
+    out1, (h1, s1) = self.layer1(x,    h[0], s[0])   # Layer 1
+    out2, (h2, s2) = self.layer2(out1, h[1], s[1])   # Layer 2
+    output = self.linear(out2)                         # Linear -> logits
+
+Initial states are zero tensors of shape (2, 1, hidden_size) for both h and s,
+where the first dimension indexes the two layers.
+
+
+(Parameter Count)
+
+
+Component           Parameters      Description
+
+Layer 1  W_x        23,552          45 -> 4*128 (with bias)
+Layer 1  W_h        65,536          128 -> 4*128 (no bias)
+Layer 2  W_x        65,536          128 -> 4*128 (no bias)
+Layer 2  W_h        65,536          128 -> 4*128 (no bias)
+Linear               5,805          128 -> 45 (with bias)
+
+TOTAL              226,477          trainable parameters
+
+Why 4 * hidden_size?
+The efficient implementation combines all four gates into one Linear layer
+of size 4 * hidden_size, then splits with .chunk(4). This is mathematically
+equivalent to four separate Linear layers but uses a single BLAS operation,
+making it faster on both CPU and GPU.
+
+
+
+5. TRAINING (train.py)
+
+
+
+(Configuration - config.json)
+
+
+{
+    "training": {
+        "epochs": 50,
+        "learning_rate": 0.001,
+        "save_model": true,
+        "continue_training": false
+    },
+    "dataset": { "name": "chapter1" },
+    "model": {
+        "name": "LSTM",
+        "d_one_hot": 45,
+        "d_lstm": 128
+    }
+}
+
+Parameter           Value       Notes
+
+epochs              50          Full passes over the dataset
+learning_rate       0.001       Adam optimizer default
+batch_size          1           Variable-length sequences require batch=1
+d_one_hot           45          Alphabet size
+d_lstm              128         Hidden state dimension
+optimizer           Adam        Adaptive learning rate optimizer
+loss                CrossEntropy With class indices (sequence-first layout)
+device              CUDA        NVIDIA GeForce RTX 4050 Laptop GPU
+
+
+(Training Loop — Step by Step)
+
+
+For each epoch:
+  For each sentence in the dataset:
+    1. Move inputs and targets to device (CUDA)
+    2. Transpose to sequence-first: (1, T, 45) -> (T, 1, 45)
+    3. Initialize hidden and cell states to zeros: shape (2, 1, 128)
+    4. Forward pass: model produces logits of shape (T-1, 1, 45)
+    5. Reshape logits: (T-1, 45) for CrossEntropyLoss
+    6. Reshape targets: (T-1,) flat integer indices
+    7. Compute loss: CrossEntropyLoss(logits, targets)
+    8. loss.backward() — Backpropagation Through Time (BPTT)
+    9. optimizer.step() — update all 226,477 parameters
+    10. Append loss.item() to sequence_errors
+
+  Epoch loss = mean of all sequence_errors
+  If new best loss -> save model checkpoint to checkpoints/LSTM/LSTM.pt
+
+Why batch_size = 1?
+Each training sentence has a different length (T varies per line). PyTorch
+DataLoader cannot automatically batch variable-length sequences, so batch=1
+is used. Each sentence is processed independently.
+
+Why sequence-first?
+CrossEntropyLoss expects inputs of shape (N, C) where N is number of samples
+and C is number of classes. With sequence-first layout (T, 1, 45), reshaping
+to (T, 45) directly gives the right format.
+
+
+(Training Loss — All 50 Epochs)
+
+
+Model name: LSTM
+Training on: cuda
+Trainable model parameters: 226477
+Epoch 01/50 took 29.40 seconds. 		Average epoch training error: (+)3.0155793781
+Epoch 02/50 took 30.00 seconds. 		Average epoch training error: (+)2.5306246281
+Epoch 03/50 took 30.41 seconds. 		Average epoch training error: (+)2.2993616863
+Epoch 04/50 took 30.41 seconds. 		Average epoch training error: (+)2.1872516901
+Epoch 05/50 took 29.61 seconds. 		Average epoch training error: (+)2.1052468352
+Epoch 06/50 took 29.44 seconds. 		Average epoch training error: (+)2.0352284148
+Epoch 07/50 took 29.77 seconds. 		Average epoch training error: (+)1.979471231 
+Epoch 08/50 took 29.69 seconds. 		Average epoch training error: (+)1.9260509513
+Epoch 09/50 took 30.35 seconds. 		Average epoch training error: (+)1.8775196824
+Epoch 10/50 took 29.46 seconds. 		Average epoch training error: (+)1.8351824913
+Epoch 11/50 took 29.74 seconds. 		Average epoch training error: (+)1.7912754754
+Epoch 12/50 took 29.79 seconds. 		Average epoch training error: (+)1.7482891147
+Epoch 13/50 took 29.71 seconds. 		Average epoch training error: (+)1.7097819414
+Epoch 14/50 took 29.80 seconds. 		Average epoch training error: (+)1.6728103197
+Epoch 15/50 took 29.30 seconds. 		Average epoch training error: (+)1.6369174322
+Epoch 16/50 took 29.93 seconds. 		Average epoch training error: (+)1.6036633696
+Epoch 17/50 took 28.84 seconds. 		Average epoch training error: (+)1.5681606473
+Epoch 18/50 took 29.25 seconds. 		Average epoch training error: (+)1.5380670589
+Epoch 19/50 took 29.03 seconds. 		Average epoch training error: (+)1.5066470381
+Epoch 20/50 took 29.00 seconds. 		Average epoch training error: (+)1.4742580725
+Epoch 21/50 took 28.46 seconds. 		Average epoch training error: (+)1.4454597844
+Epoch 22/50 took 28.96 seconds. 		Average epoch training error: (+)1.414784461 
+Epoch 23/50 took 29.52 seconds. 		Average epoch training error: (+)1.3861757109
+Epoch 24/50 took 28.66 seconds. 		Average epoch training error: (+)1.3600966343
+Epoch 25/50 took 28.38 seconds. 		Average epoch training error: (+)1.3332609457
+Epoch 26/50 took 28.27 seconds. 		Average epoch training error: (+)1.3066390292
+Epoch 27/50 took 28.56 seconds. 		Average epoch training error: (+)1.2817635079
+Epoch 28/50 took 28.30 seconds. 		Average epoch training error: (+)1.2549616304
+Epoch 29/50 took 28.42 seconds. 		Average epoch training error: (+)1.2315550675
+Epoch 30/50 took 28.29 seconds. 		Average epoch training error: (+)1.2046647105
+Epoch 31/50 took 28.41 seconds. 		Average epoch training error: (+)1.1817225533
+Epoch 32/50 took 28.61 seconds. 		Average epoch training error: (+)1.1570662103
+Epoch 33/50 took 28.41 seconds. 		Average epoch training error: (+)1.132915446 
+Epoch 34/50 took 28.74 seconds. 		Average epoch training error: (+)1.1134327448
+Epoch 35/50 took 28.41 seconds. 		Average epoch training error: (+)1.0884392035
+Epoch 36/50 took 28.71 seconds. 		Average epoch training error: (+)1.0616137967
+Epoch 37/50 took 28.40 seconds. 		Average epoch training error: (+)1.0413467258
+Epoch 38/50 took 28.67 seconds. 		Average epoch training error: (+)1.0184125599
+Epoch 39/50 took 28.45 seconds. 		Average epoch training error: (+)0.9950773217
+Epoch 40/50 took 28.47 seconds. 		Average epoch training error: (+)0.9727720483
+Epoch 41/50 took 28.85 seconds. 		Average epoch training error: (+)0.9553670949
+Epoch 42/50 took 28.98 seconds. 		Average epoch training error: (+)0.9307372036
+Epoch 43/50 took 28.99 seconds. 		Average epoch training error: (+)0.9116080599
+Epoch 44/50 took 28.54 seconds. 		Average epoch training error: (+)0.8905346968
+Epoch 45/50 took 28.57 seconds. 		Average epoch training error: (+)0.8726594188
+Epoch 46/50 took 28.33 seconds. 		Average epoch training error: (+)0.8520944699
+Epoch 47/50 took 28.28 seconds. 		Average epoch training error: (+)0.8381227521
+Epoch 48/50 took 28.33 seconds. 		Average epoch training error: (+)0.8279132141
+Epoch 49/50 took 28.66 seconds. 		Average epoch training error: (+)0.7959848194
+Epoch 50/50 took 28.96 seconds. 		Average epoch training error: (+)0.7748382399
+
+
+
+Total training time: ~1450 seconds (~24 minutes)
+Every epoch showed improvement (all marked with '+')
+
+
+(Loss Analysis)
+
+
+INITIAL LOSS (Epoch 1: 3.016)
+  The theoretical maximum for uniform random guessing over 45 characters is
+  log(45) ≈ 3.807. Starting at 3.016 means the model is slightly better than
+  random from the start, due to small non-zero weight initialization.
+
+RAPID EARLY IMPROVEMENT (Epochs 1-15: 3.016 -> 1.637)
+  Loss drops by 1.38 points in the first 15 epochs. The model quickly learns:
+  - The most frequent characters: spaces, 'e', 't', 'a', 'o'
+  - Common short patterns: 'the', 'and', 'of', 'said'
+  - Basic sentence structure
+  These patterns have the strongest gradient signal and are learned first.
+
+STEADY MIDDLE PHASE (Epochs 15-35: 1.637 -> 1.088)
+  Loss decreases more gradually. The model is now learning:
+  - Less frequent patterns and rare characters
+  - Punctuation placement: commas, apostrophes, quotation marks
+  - Dialogue markers: 'said pippin.', 'said beregond.'
+  - Character names and longer word patterns
+  The two-layer architecture helps here: Layer 1 captures local character
+  patterns while Layer 2 captures longer word and phrase patterns.
+
+FINE-TUNING PHASE (Epochs 35-50: 1.088 -> 0.775)
+  Loss drops more slowly. The model refines understanding of uncommon
+  sequences. Loss is still decreasing at epoch 50 — further training
+  would yield continued improvement.
+
+TOTAL REDUCTION: 3.016 -> 0.775 = 74% reduction over 50 epochs
+
+WHY ~29 SECONDS/EPOCH DESPITE GPU?
+  The RTX 4050 GPU is used but provides limited speedup due to the sequential
+  for-loop in LSTMLayer. Each timestep depends on h_{t-1}, so timesteps cannot
+  be parallelized across time. The GPU parallelizes matrix multiplications
+  within each timestep, but the T sequential steps are the bottleneck.
+
+
+
+6. TESTING — TEXT GENERATION (test.py)
+
+
+
+(Closed-Loop Generation Process)
+
+
+Text generation uses a two-phase approach:
+
+PHASE 1 — TEACHER FORCING (first 30 characters):
+  - Real characters from the dataset are fed into the model one by one
+  - This warms up the hidden states h and s with meaningful context
+  - The model does not generate text during this phase
+  - prompt_length = 30 (set in config.json)
+
+PHASE 2 — CLOSED-LOOP GENERATION (next 400 characters):
+  - The model generates freely from its own predictions
+  - At each step:
+      1. Model outputs logits of shape (1, 1, 45)
+      2. Softmax converts logits to probabilities
+      3. argmax selects the most likely character (greedy decoding)
+      4. This character is converted to a one-hot vector
+      5. The one-hot vector becomes the input for the NEXT step
+  - cl_steps = 400 (set in config.json)
+
+This is called "closed-loop" because the model's output feeds back as its
+own input — forming a closed feedback loop.
+
+
+
+(Generated Text Example)
+
+
+Model name: LSTM
+Trainable model parameters: 226477
+
+Initialization: ‘will you come with me?’ said ...
+
+Tolkien:
+ --- ‘will you come with me?’ said beregond. ‘you may join my mess for this day. i do not know to what company you will be assigned; or the lord may hold you at his own command. but you will be welcome. and it will be well to meet as many men as you may, while there is yet time.’
+
+LSTM model:
+ --- ‘will you come with me?’ said pippin.
+
+‘if you have not spoken of these to the great fall. but the shire and flowed upsered, and he was are that is not there. i have wall the strange of the days. and the last that was what with a mestry on the city.’
+ said beregond. ‘it is head and stander in the city.’
+ said pippin. ‘many bet or so not that the man’s faisht?’
+ headsed beregond of the dark hour.
+
+nged wast papted to the stones 
+
+
+
+
+7. OUTPUT ANALYSIS
+
+
+
+(What the Model Learned Correctly)
+
+
+  Dialogue structure:
+    The model correctly uses '...' quotes and the 'said character.' pattern
+    throughout the generated text. This is a strong syntactic pattern in
+    the training data that the model learned well.
+
+  Real character names:
+    'pippin' and 'beregond' appear naturally in context — the model learned
+    that these names typically follow 'said' in the training data.
+
+  Punctuation placement:
+    Periods, commas, apostrophes, and newlines are placed in approximately
+    correct positions, showing the model learned sentence boundaries.
+
+  Common Tolkien vocabulary:
+    Words like 'shire', 'city', 'dark', 'lord', 'great', 'stone' appear
+    because they are frequent in the training text.
+
+  Sentence openings:
+    'if you...', 'but the...', 'and the...' follow natural dialogue patterns
+    that the model saw frequently during training.
+
+  No repetition loops:
+    At 50 epochs, the model generates varied, non-repetitive text. At only
+    20 epochs, it produced loops like "and see the store and see the store..."
+    showing that longer training significantly improves diversity.
+
+
+(What the Model Gets Wrong)
+
+
+  Invented words:
+    'upsered', 'faisht', 'headsed', 'mestry', 'papted' do not exist.
+    These arise when the model generates character sequences that are
+    statistically plausible letter-by-letter but form no real word.
+
+  Grammar errors:
+    'he was are that is not there' breaks subject-verb agreement.
+    The model has no grammatical rules — only character statistics.
+
+  Semantic incoherence:
+    After a few sentences, the text loses meaning. The model has no
+    understanding of what words mean or how ideas connect logically.
+
+  Character fragments:
+    'nged wast papted' are incomplete word sequences from the beginning
+    of the generated segment where the model loses coherent word boundaries.
+
+
+(Why These Errors Occur)
+
+
+The model operates purely at the CHARACTER level with no understanding of:
+  - Word meaning (semantics)
+  - Grammar rules (syntax)
+  - Logical coherence (discourse)
+
+It learns only: "given the last N characters, what character comes next?"
+based on statistical co-occurrence in the training text.
+
+Additional limiting factors:
+  - Small dataset: only one chapter, limiting pattern diversity
+  - Small model: 128 hidden units for a complex generative task
+  - Greedy decoding: always picking argmax can lead to locally optimal
+    but globally poor sequences (temperature sampling would help)
+  - No word-level representation: no concept of word boundaries
+
+Despite these limitations, results align with the exercise goal:
+"the goal is not to produce state-of-the-art results but rather to
+gain experiences on text generation with neural architectures."
+
+
+(Comparison: 20 Epochs vs 50 Epochs)
+
+
+Metric                  20 Epochs               50 Epochs
+
+Final loss              1.5112                  0.7748
+Repetition loops        Yes (severe)            No
+Character names         Occasional              Frequent and natural
+Invented words          Many                    Fewer
+Dialogue structure      Partial                 Consistent
+Training time           ~1193 seconds           ~1451 seconds
+
+Training longer clearly improves output quality. The most significant
+improvement is the disappearance of repetition loops — a sign that the
+model learned more diverse character transition probabilities.

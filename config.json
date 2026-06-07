@@ -1,0 +1,23 @@
+{
+	"training": {
+		"save_model": true,
+		"epochs": 50,
+		"learning_rate": 0.001,
+		"continue_training": false
+	},
+
+	"testing": {
+		"prompt_length": 30,
+		"closed_loop_steps": 400
+	},
+
+	"dataset": {
+		"name": "chapter1"
+	},
+
+	"model": {
+		"name": "LSTM",
+		"d_one_hot": 45,
+		"d_lstm": 128
+	}
+}
